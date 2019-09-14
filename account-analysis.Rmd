@@ -1,0 +1,274 @@
+---
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: scroll
+params:
+  username: hrbrmstr
+  n_tweets_to_retrieve: 3000
+title: "Account Analysis of `r params$username`"
+editor_options: 
+  chunk_output_type: console
+---
+
+<!-- NOTE THE PARAMETERS ^^ -->
+<!-- you can use rmarkdown::render() with this to generate a report for an individual -->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, out.width='100%')
+```
+
+```{r libs}
+library(DT)
+library(rtweet)
+library(ISOcodes)
+library(hrbrthemes)
+library(urltools)
+library(tidyverse)
+```
+
+<!-- You might want to add cache=TRUE for the data block if you're tweaking the aestehtics -->
+
+```{r data}
+user <- lookup_users(params$username)
+
+tl <- get_timeline(params$username, params$n_tweets_to_retrieve)
+attr(tl$created_at, 'tzone') = 'EST5EDT'
+tl <- mutate(tl, tsday = as.Date(created_at))
+tl <- mutate(tl, dow = lubridate::wday(created_at, label=TRUE, abbr=FALSE))
+tl <- mutate(tl, hr = lubridate::hour(created_at))
+```
+
+Row {data-height=750}
+-------------------------------------
+
+### `r params$username` Account Overview {data-width=33%}
+
+```{r user_info}
+select(
+  user,
+  screen_name, name,
+  statuses_count, friends_count, followers_count, favourites_count, listed_count,
+  description, account_created_at, user_id,
+  profile_expanded_url, location
+) %>% 
+  gather(field, value) %>% 
+  DT::datatable(options = list(pageLength = nrow(.)))
+```
+
+
+### Daily Rhythm {data-width=66%}
+
+```{r daily-rhythm, fig.width=1200/72, fig.height=500/72}
+count(tl, dow, hr) %>% 
+  mutate(hr = sprintf("%02d:00", hr)) %>% 
+  complete(dow, hr=sprintf("%02d:00", 0:23)) %>% 
+  ggplot(aes(hr, dow)) +
+  geom_tile(aes(fill=n, color=n)) +
+  scale_colour_viridis_c(name = "Tweet\nCount", direction = -1, na.value="white", option = "magma") +
+  scale_fill_viridis_c(name = "Tweet\nCount", direction = -1, na.value="white", option = "magma") +
+  scale_x_discrete(position = "top") +
+  scale_y_discrete() +
+  coord_equal() +
+  labs(x = NULL, y = NULL) + #, title = "Daily Rhythm") +
+  theme_ipsum_rc(grid="")
+```
+
+Row {data-height=350}
+-------------------------------------
+
+### Tweet Volume by Date {data-width=33%}
+
+```{r tweet-volume-day, fig.width=800/72, fig.height=350/72}
+count(tl, tsday) %>% 
+  ggplot(aes(tsday, n)) +
+  geom_col(width=0.55, fill = ft_cols$blue) +
+  scale_y_comma() +
+  labs(x = NULL, y = "Tweets") + #, title = "Tweet Volume by Date") +
+  theme_ipsum_rc(grid="Y")
+```
+
+### Day of Week {data-width=33%}
+
+```{r tweet-volume-dow, fig.width=800/72, fig.height=350/72}
+count(tl, dow) %>% 
+  ggplot(aes(dow, n)) +
+  geom_col(width=0.55, fill = ft_cols$blue) +
+  scale_y_comma() +
+  labs(x = NULL, y = "Tweets") + #, title = "Tweet Volume by Day of Week") +
+  theme_ipsum_rc(grid="Y")
+```
+
+Row {data-height=500}
+-------------------------------------
+
+### Tweet Type {data-width=33%}
+
+```{r tweet-type, fig.height=500/72, fig.width=400/72}
+mutate(tl, tweet_type = case_when(
+  is_retweet ~ "Retweet",
+  is_quote ~ "Quote",
+  reply_to_user_id == user_id ~ "Self-Reply",
+  !is.na(reply_to_user_id) ~ "Reply",
+  TRUE ~ "Tweet"
+)) %>% 
+  count(tweet_type, sort=TRUE) %>% 
+  mutate(tweet_type = fct_inorder(tweet_type) %>% fct_rev()) %>% 
+  ggplot(aes(tweet_type, n)) +
+  geom_col(width=0.55, fill = ft_cols$blue) +
+  scale_y_comma(position = "right") +
+  labs(x = NULL, y = "Tweets") + #, title = "Tweet Type") +
+  coord_flip() +
+  theme_ipsum_rc(grid="X")
+```
+
+### Language of Tweets {data-width=33%}
+
+```{r languag-of-tweets, fig.height=500/72, fig.width=400/72}
+count(tl, lang, sort=TRUE) %>% 
+  left_join(ISOcodes::ISO_639_2, c("lang"="Alpha_2")) %>% 
+  mutate(Name = gsub(";.*$", "", ifelse(is.na(Name), "Unknown", Name))) %>% 
+  mutate(Name = fct_inorder(Name) %>% fct_rev()) %>% 
+  ggplot(aes(Name, n)) +
+  geom_col(width=0.55, fill = ft_cols$blue) +
+  scale_y_comma(position = "right") +
+  coord_flip() +
+  labs(x = NULL, y = "Tweets") + #, title = "Language of Tweets") +
+  theme_ipsum_rc(grid="X")
+```
+
+### Used Interface {data-width=33%}
+
+```{r used-interface, fig.height=500/72, fig.width=400/72}
+count(tl, source, sort=TRUE) %>% 
+  mutate(source = fct_inorder(source) %>% fct_rev()) %>% 
+  ggplot(aes(source, n)) +
+  geom_col(width=0.55, fill = ft_cols$blue) +
+  scale_y_comma(position = "right") +
+  coord_flip() +
+  labs(x = NULL, y = "Tweets") + #, title = "Used Interface") +
+  theme_ipsum_rc(grid="X")
+```
+
+Row {data-height=500}
+-------------------------------------
+
+### Used Hashtags {data-width=50%}
+
+```{r used-hashtags, fig.height=500/72, fig.width=600/72}
+unlist(tl$hashtags) %>% 
+  discard(is.na) %>% 
+  tolower() %>% 
+  fct_lump(n = 10, ties = "first") %>% 
+  table(dnn="hashtag") %>% 
+  broom::tidy() %>% 
+  arrange(desc(n)) %>% 
+  mutate(hashtag = factor(hashtag, levels = c(setdiff(hashtag, "Other"), "Other")) %>% fct_rev()) %>% 
+  ggplot(aes(hashtag, n)) +
+  geom_col(width=0.55, fill = ft_cols$blue) +
+  scale_y_comma(position = "right") +
+  coord_flip() +
+  labs(x = NULL, y = "Tweets") + #, title = "Used Hashtags") +
+  theme_ipsum_rc(grid="X")
+```
+
+### URL Apex Domains {data-width=50%}
+
+```{r apex-domains, fig.height=500/72, fig.width=600/72}
+unlist(tl[,c("urls_url", "urls_expanded_url")], use.names = FALSE) %>% 
+  discard(is.na) %>% 
+  discard(~grepl("pbs\\.twimg\\.com|twitter\\.com|t\\.co", .)) %>% 
+  urltools::domain() %>% 
+  urltools::suffix_extract() %>% 
+  as_tibble() %>% 
+  mutate(apex = glue::glue("{domain}.{suffix}")) %>% 
+  mutate(apex = fct_lump(apex, n = 10, ties = "first")) %>% 
+  count(apex, sort=TRUE) %>% 
+  mutate(apex = factor(apex, levels = c(setdiff(apex, "Other"), "Other"))) %>% 
+  ggplot(aes(apex, n)) +
+  geom_col(width=0.55, fill = ft_cols$blue) +
+  coord_flip() +
+  scale_y_comma(position = "right") +
+  labs(x = NULL, y = "Tweets") + #, title = "URL Apex Domains") +
+  theme_ipsum_rc(grid="X")
+```
+
+Row {data-height=500}
+-------------------------------------
+
+### Replied Users {data-width=33%}
+
+```{r replied-users, fig.height=500/72, fig.width=400/72}
+unlist(tl$reply_to_screen_name) %>% 
+  discard(is.na) %>% 
+  discard(`==`, "hrbrmstr") %>% 
+  tolower() %>% 
+  fct_lump(n = 10, ties = "first") %>% 
+  table(dnn="replied_to_users") %>% 
+  broom::tidy() %>% 
+  arrange(desc(n)) %>% 
+  mutate(replied_to_users = factor(replied_to_users, levels = c(setdiff(replied_to_users, "Other"), "Other")) %>% fct_rev()) %>% 
+  ggplot(aes(replied_to_users, n)) +
+  geom_col(width=0.55, fill = ft_cols$blue) +
+  coord_flip() +
+  scale_y_comma(position = "right") +
+  labs(x = NULL, y = "Tweets") + #, title = "Replied Users") +
+  theme_ipsum_rc(grid="X")
+```
+
+### Retweeted Users {data-width=33%}
+
+```{r retweeted-users, fig.height=500/72, fig.width=400/72}
+unlist(tl$retweet_screen_name) %>% 
+  discard(is.na) %>% 
+  discard(`==`, "hrbrmstr") %>% 
+  tolower() %>% 
+  fct_lump(n = 10, ties = "first") %>% 
+  table(dnn="retweeted_users") %>% 
+  broom::tidy() %>% 
+  arrange(desc(n)) %>% 
+  mutate(retweeted_users = factor(retweeted_users, levels = c(setdiff(retweeted_users, "Other"), "Other")) %>% fct_rev()) %>% 
+  ggplot(aes(retweeted_users, n)) +
+  geom_col(width=0.55, fill = ft_cols$blue) +
+  coord_flip() +
+  scale_y_comma(position = "right") +
+  labs(x = NULL, y = "Tweets") + #, title = "Retweeted Users") +
+  theme_ipsum_rc(grid="X")
+```
+
+### Quoted Users {data-width=33%}
+
+```{r quoted-users, fig.height=500/72, fig.width=400/72}
+unlist(tl$quoted_screen_name) %>% 
+  discard(is.na) %>% 
+  discard(`==`, "hrbrmstr") %>% 
+  tolower() %>% 
+  fct_lump(n = 10, ties = "first") %>% 
+  table(dnn="quoted_users") %>% 
+  broom::tidy() %>% 
+  arrange(desc(n)) %>% 
+  mutate(quoted_users = factor(quoted_users, levels = c(setdiff(quoted_users, "Other"), "Other")) %>% fct_rev()) %>% 
+  ggplot(aes(quoted_users, n)) +
+  geom_col(width=0.55, fill = ft_cols$blue) +
+  coord_flip() +
+  scale_y_comma(position = "right") +
+  labs(x = NULL, y = "Tweets") + #, title = "Quoted Users") +
+  theme_ipsum_rc(grid="X")
+```
+
+Row {data-height=750}
+-------------------------------------
+
+### Tweets
+
+```{r}
+mutate(tl, tweet_type = case_when(
+  is_retweet ~ "Retweet",
+  is_quote ~ "Quote",
+  reply_to_user_id == user_id ~ "Self-Reply",
+  !is.na(reply_to_user_id) ~ "Reply",
+  TRUE ~ "Tweet"
+)) %>% 
+  select(created_at, tweet_type, text) %>% 
+  DT::datatable()
+```

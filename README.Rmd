@@ -1,0 +1,12 @@
+---
+title: "README"
+author: "@hrbrmstr"
+date: September 14, 2019
+output: rmarkdown::github_document
+---
+
+Twitter account analysis like [this one](https://rud.is/dl/hrbrmstr-account-analysis.html).
+
+![](account-analysis-header.png)
+
+A lesser, static version of [accountanalysis](https://accountanalysis.app).
