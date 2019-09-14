@@ -24,12 +24,15 @@ library(rtweet)
 library(ISOcodes)
 library(hrbrthemes)
 library(urltools)
+library(extrafont)
 library(tidyverse)
 ```
 
 <!-- You might want to add cache=TRUE for the data block if you're tweaking the aestehtics -->
 
 ```{r data}
+extrafont::loadfonts(quiet = TRUE)
+
 user <- lookup_users(params$username)
 
 tl <- get_timeline(params$username, params$n_tweets_to_retrieve)
@@ -37,6 +40,16 @@ attr(tl$created_at, 'tzone') = 'EST5EDT'
 tl <- mutate(tl, tsday = as.Date(created_at))
 tl <- mutate(tl, dow = lubridate::wday(created_at, label=TRUE, abbr=FALSE))
 tl <- mutate(tl, hr = lubridate::hour(created_at))
+
+saveRDS(
+  object = list(
+    user = user,
+    timeline = tl
+  ),
+  file = file.path(
+    sprintf("%s-%s.rds", as.character(Sys.Date()), fs::path_sanitize(params$username))
+  )
+)
 ```
 
 Row {data-height=750}
