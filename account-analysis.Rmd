@@ -65,6 +65,7 @@ select(
   description, account_created_at, user_id,
   profile_expanded_url, location
 ) %>% 
+  mutate(account_created_at = as.character(as.Date.POSIXct(account_created_at))) %>% 
   gather(field, value) %>% 
   DT::datatable(options = list(pageLength = nrow(.)))
 ```
